@@ -19,13 +19,15 @@ rdum <- function(n, p){
 
 ```
 
-### Data
+## Data
 
 For simplicity I use the datafile from the A&B workflow https://osf.io/puax9. It is theoretically the same as what we worked up for our 04_Main_Analyses file in the original repository. I use it here to make sure we are comparing apples to apples.
 
 ```{r data, warning = F}
 df <- read.dta13(here::here("data", "BRW Data set - augmented.dta"))
 ```
+
+## Adding Random Dummies
 
 ### Our original m13
 
@@ -133,7 +135,7 @@ rownames(rs) <- NULL
 
 
 ```{r plot}
-agg_png(here::here("results", "Fig1.png"), res = 144, height = 500, width = 1000)
+agg_png(here::here("results", "Fig1.png"), res = 288, height = 1000, width = 2000)
 rs %>%
   ggplot(aes(V1)) +
   geom_density() +
@@ -148,5 +150,56 @@ rs %>%
 dev.off()
 
 knitr::include_graphics(here::here("results", "Fig1.png"))
+```
+
+## Weighted Least Squares
+
+Here we use the weighted least squares approach of A&B which they claim filters out low quality results as part of a proper meta-analytic step.
+
+We used a multiverse to simulate how much variance we might be able to explain in our original study
+https://github.com/nbreznau/CRI/blob/master/code/06_CRI_Multiverse.Rmd
+
+We import this multiverse here to apply a weighted least-squares regression.
+
+### Original Multiverse Simulation
+
+```{r multimodels, warning = FALSE}
+load(file = here::here("results/multi_df.Rda"))
+
+# m0 <- lm(AME ~ 1, data = multi_df)
+m1 <- lm(AME ~ factor(dv) + factor(AME_type), data = multi_df)
+m2 <- lm(AME ~ factor(dv) + factor(AME_type) + factor(sample), data = multi_df)
+m3 <- lm(AME ~ factor(dv) + factor(AME_type) + factor(sample) + unemp + socx + gdp + otherdv, data = multi_df)
+m4 <- lm(AME ~ factor(dv) + factor(AME_type) + factor(sample) + unemp + socx + gdp + otherdv + factor(mator), data = multi_df)
+m5 <- lm(AME ~ factor(dv) + factor(AME_type) + factor(dv)*factor(AME_type) + factor(sample) + unemp + socx + gdp + otherdv + factor(mator), data = multi_df)
+
+expvar <- matrix(nrow = 5, ncol = 3)
+
+expvar[,1] <- c("m1","m2","m3","m4","m5")
+expvar[,2] <- c("DVs + AME type","+ sample", "+ IVs", "+ other DV + Estimator", "DV*Type interaction")
+expvar[,3] <- c(summary(m1)[["r.squared"]], summary(m2)[["r.squared"]], summary(m3)[["r.squared"]], summary(m4)[["r.squared"]], summary(m5)[["r.squared"]])
+
+#write.csv(expvar, file = here::here("results/TblS8.csv"))
+```
+
+### Weighted Least Squares
+
+The formula for weighting is 1/SE^2 (SE of estimates)
+
+```{r wls}
+# calculate weights (SEs)
+coefficient <- 1.5      # Example coefficient value
+p_value <- 0.03         # Example p-value
+n <- 32                 # Number of observations
+k <- 3                  # Number of predictors including the intercept
+
+# Calculate the degrees of freedom
+df <- n - k
+
+# Calculate the t-statistic from the p-value
+t_value <- qt(1 - p_value / 2, df)
+
+# Calculate the standard error
+standard_error <- coefficient / t_value
 ```
 
