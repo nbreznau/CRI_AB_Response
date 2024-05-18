@@ -1,4 +1,6 @@
-### Reply to Auspurg and Brüderl’s Rant in Response to Our Hidden Universe Study
+### Reply to Auspurg and Brüderl’s  Critique to Our Hidden Universe Study
+
+This file has been updated to include a response to Auspurg and Brüderl’s submission of their critique to Sociological Science after it was rejected from PNAS.
 
 #### Original Study 
 
@@ -18,4 +20,4 @@ Paper: https://osf.io/preprints/metaarxiv/uc84k/
 
 Import the following file:
 
-BRW Data set - augmented.dta https://osf.io/puax9
+BRW Data set - augmented.dta https://osf.io/pua

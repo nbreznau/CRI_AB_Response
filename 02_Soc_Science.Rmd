@@ -1,0 +1,87 @@
+---
+title: "02 Soc Sci"
+output: html_document
+---
+
+Our paper was again held up to criticism by a submission to Sociological Science. This is my workflow to defend against these criticisms.
+
+The data used herein come from the original CRI workflow. The file multi_df_original.RDS is a multiverse analysis we used to benchmark how much variance we would expect to explain. The workflow to produce it is at [06_CRI_Multiverse](https://github.com/nbreznau/CRI/blob/master/code/06_CRI_Multiverse.Rmd).
+
+```{r setup, include=FALSE}
+library("pacman")
+
+options(scipen = 999)
+
+pacman::p_load("ragg","lme4","dplyr")
+```
+
+
+
+## Expected Explained Variance
+
+### Original results
+
+Our first run from 2020 led to these results. We used R 3.6.3 which has proved difficult to reinstall and get all the previous package versions running. None the less these are the results. They are presented in Table S6 in our Supplementary Materials in our original paper. 
+
+```{r multimodels, warning = FALSE}
+multi_df <- readRDS(file = here::here("data/multi_df_original.RDS"))
+
+# m0 <- lm(AME ~ 1, data = multi_df)
+m1 <- lm(AME ~ factor(dv) + factor(AME_type), data = multi_df)
+m2 <- lm(AME ~ factor(dv) + factor(AME_type) + factor(sample), data = multi_df)
+m3 <- lm(AME ~ factor(dv) + factor(AME_type) + factor(sample) + unemp + socx + gdp + otherdv, data = multi_df)
+m4 <- lm(AME ~ factor(dv) + factor(AME_type) + factor(sample) + unemp + socx + gdp + otherdv + factor(mator), data = multi_df)
+m5 <- lm(AME ~ factor(dv) + factor(AME_type) + factor(dv)*factor(AME_type) + factor(sample) + unemp + socx + gdp + otherdv + factor(mator), data = multi_df)
+
+expvar <- matrix(nrow = 5, ncol = 4)
+
+expvar[,1] <- c("m1","m2","m3","m4","m5")
+expvar[,2] <- c("DVs + AME type","+ sample", "+ IVs", "+ other DV + Estimator", "DV*Type interaction")
+expvar[,3] <- c(summary(m1)[["r.squared"]], summary(m2)[["r.squared"]], summary(m3)[["r.squared"]], summary(m4)[["r.squared"]], summary(m5)[["r.squared"]])
+
+
+```
+
+### WLS Models
+
+Based on a critique of our paper we run WLS models which is to weight models by 1/SE^2. The purpose is to demonstrate how WLS can inflate the r-square.
+
+We did not save the original standard errors in 2020, merge in from new run. 
+
+```{r WLS, warning = FALSE}
+new_multi_df <- readRDS(here::here("data", "multi_df.RDS")) %>%
+    select(mname, mator, sample, stock, netmig, AME_type, twowayfe, otherdv, SE)
+
+# generate weights 1/SE^6
+multi_df <- multi_df %>%
+    left_join(new_multi_df, by = c("mname", "mator", "sample", "stock", "netmig", "twowayfe", "otherdv", "AME_type")) %>%
+    mutate(weight = 1/(SE^2),
+           mator1 = ifelse(mator == "ols", 1, 0),
+           mator2 = ifelse(mator == "glm", 1, 0))
+
+# m0 <- lm(AME ~ 1, data = multi_df)
+m1w <- lm(AME ~ factor(dv) + factor(AME_type), data = multi_df, weights = weight)
+m2w <- lm(AME ~ factor(dv) + factor(AME_type) + factor(sample), data = multi_df, weights = weight)
+m3w <- lm(AME ~ factor(dv) + factor(AME_type) + factor(sample) + unemp + socx + gdp + otherdv, data = multi_df, weights = weight)
+m4w <- lm(AME ~ factor(dv) + factor(AME_type) + factor(sample) + unemp + socx + gdp + otherdv + mator1 + mator2, data = multi_df, weights = weight)
+m5w <- lm(AME ~ factor(dv) + factor(AME_type) + factor(dv)*factor(AME_type) + factor(sample) + unemp + socx + gdp + otherdv + mator1 + mator2, data = multi_df, weights = weight)
+
+
+expvar[,4] <- c(summary(m1w)[["r.squared"]], summary(m2w)[["r.squared"]], summary(m3w)[["r.squared"]], summary(m4w)[["r.squared"]], summary(m5w)[["r.squared"]])
+
+expvar <- as.data.frame(expvar)
+colnames(expvar) <- c("Number", "Model Specs", "OLS r^2", "WLS r^2")
+
+write.csv(expvar, file = here::here("results/Tbl1.csv"))
+```
+
+```{r plotms}
+sjPlot::tab_model(m5, m5w, show.ci = FALSE, p.style = "stars")
+```
+
+## Colophon
+
+```{r col}
+sessionInfo()
+```
+

@@ -1,0 +1,213 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+ 
+
+```{r setup}
+
+pacman::p_load("tidyverse",
+               "readstata13",
+               "ragg")
+
+# variable simulator function
+rdum <- function(n, p){
+  # p is the proportion of 1s
+  x <- c(rep(1, times=n * p), rep(0, times=n * (1 - p)))
+  x[sample(length(x))] # or sample(x)
+}
+
+```
+
+### Data
+
+For simplicity I use the datafile from the A&B workflow https://osf.io/puax9. It is theoretically the same as what we worked up for our 04_Main_Analyses file in the original repository. I use it here to make sure we are comparing apples to apples.
+
+```{r data, warning = F}
+df <- read.dta13(here::here("data", "BRW Data set - augmented.dta"))
+```
+
+### Our original m13
+
+16 variables (coefficients)
+```{r m1}
+m1_orig <- lm(ame ~ IncDiff + House + logit + ols + Stock + ChangeFlow + w1996 + w2006*w2016 + orig13 + eeurope + allavailable + twowayfe + cy + total_score, data = df)
+
+m1r2a <- summary(m1_orig)$adj.r.squared
+m1r2 <- summary(m1_orig)$r.squared
+
+NB_aic <- AIC(m1_orig)
+```
+
+### A&B augmented 1
+
+44 variables: Addition of 28 variables (coefficients)
+```{r m2}
+m2_AB <- lm(ame ~ factor(dv) + factor(IV) + saf + factor(IV_m) + factor(IV_s) + w1985 + w1990 + w1996 + w2006*w2016 + w2016 + orig13 + eeurope + allavailable + twowayfe + cy + as.numeric(total_score), data = df)
+
+m2r2a <- summary(m2_AB)$adj.r.squared
+m2r2 <- summary(m2_AB)$r.squared
+
+```
+
+### A&B augmented 2
+```{r m3}
+m3_AB <- lm(ame ~ SE + factor(dv) + factor(IV) + saf + factor(IV_m) + factor(IV_s) + factor(IV_t) + factor(IV_e) + squared_imm + logit + lpm + ols + ologit + mlogit + ml_glm + bayes + mlwin + mplus + dichotomize + categorical + mmodel + anynonlin + w1985 + w1990 + w1996 + w2006*w2016 + w2016 + mlm_re + mlm_fe + hybrid_mlm + orig13 + eeurope + allavailable + twowayfe + cy + as.numeric(total_score), data = df)
+
+m3r2a <- summary(m3_AB)$adj.r.squared
+m3r2 <- summary(m3_AB)$r.squared
+m3_aic <- AIC(m3_AB)
+```
+
+### Simulate as many random dummies
+
+#### Generate Variables
+```{r m4sim}
+
+i = 1000
+seed = 123456
+
+for (f in 1:i) {
+  # setup empty dataframe for each i
+  seed = seed+1
+  set.seed(seed)
+  #do 46 random draws of a dummy variable with any plausible range
+  seq <- runif(30, min = 0.002, max = 0.998)
+  #add 11 draws of very rare cases, as many of the variables they included identify specific teams or just a few teams or models, make these by team as well
+  seq[c(31,32,33,34,35,36,37,38,39,40,41)] <- runif(11, min = 0.0008, max = 0.0012)
+  
+  dfn <- paste("df",f, sep = "_")
+  
+  datalist = list()
+  for (n in 1:41) {
+    # unclear why we need an extra value (1254 v 1253)
+    dat <- rdum(1254, seq[n])
+    datalist[[n]] <- as.factor(dat)
+  }
+  
+  
+  # combine all results
+  dfx <- as.data.frame(do.call(cbind, c(df, as.data.frame(t(do.call(rbind, datalist))))))
+  
+  # add team specific dummies, many of the variables are at the team-level and unique to just a few teams, so this mirrors reality in the simulation
+  
+  tid <- as.data.frame(matrix(nrow = length(unique(df$tid)), ncol = 1))
+  tid$tid <- unique(df$tid)
+  tid <- select(tid, -V1)
+  dats <- sample(df$tid, 2)
+  tid$V42 <- ifelse(tid$tid %in% dats, 1, 0)
+  dats <- sample(df$tid, 2)
+  tid$V43 <- ifelse(tid$tid %in% dats, 1, 0)
+  dats <- sample(df$tid, 3)
+  tid$V44 <- ifelse(tid$tid %in% dats, 1, 0)
+  dats <- sample(df$tid, 3)
+  tid$V45 <- ifelse(tid$tid %in% dats, 1, 0)
+  dats <- sample(df$tid, 4)
+  tid$V46 <- ifelse(tid$tid %in% dats, 1, 0)
+  
+  tid$tid <- as.character(tid$tid)
+  
+  assign(dfn, left_join(as.data.frame(dfx), tid, by = "tid"))
+  
+}
+
+```
+
+### Run OLS Regressions
+
+```{r m5}
+
+results <- lapply(mget(ls(pattern = "df_")), lm, formula = paste("ame ~", "IncDiff + House + logit + ols + Stock + ChangeFlow + w1996 + w2006*w2016 + orig13 + eeurope + allavailable + twowayfe + cy + as.numeric(total_score)", " + ", paste(paste0('V', 1:46), collapse="+")))
+
+rlist = list()
+for (i in seq_along(results)){
+  res_temp <- results[[i]]
+  sum_temp <- summary(res_temp)
+  r_squared <- sum_temp$r.squared
+  rlist[[i]] <- r_squared
+}
+
+rs <- as.data.frame(t(as.data.frame(rlist)))
+rownames(rs) <- NULL
+
+```
+
+This figure is now defunct.
+
+```{r plot}
+agg_png(here::here("results", "Fig1.png"), res = 144, height = 500, width = 1000)
+rs %>%
+  ggplot(aes(V1)) +
+  geom_density() +
+  geom_vline(xintercept = m2r2, color = "darkblue", linetype = "dashed") +
+  geom_vline(xintercept = m1r2, color = "yellow4", linetype = "dashed") +
+  annotate("text", x = 0.055, y = 40, label = "Original\n16 variable\nregression", color = "yellow4", size = 3, hjust = 1) +
+  annotate("text", x = 0.114, y = 40, label = "Extended\n63 variable\nregression", color = "darkblue", size = 3, hjust = 0) +
+  xlab("r-squared") +
+  ylab("Density") +
+  xlim(0.04,0.20) +
+  theme_classic()
+dev.off()
+
+knitr::include_graphics(here::here("results", "Fig1.png"))
+```
+
+## Run WLS Regressions
+
+We show in 02_Soc_Science that WLS leads to a massive increase in r-squared. This was also the basis for a claim against our paper: that we should have used WLS and if we had we would not have found so much hidden uncertainty.
+
+Therefore, here we re-run our original model with WLS and then add in the dummy variables to show how much increase we can produce.
+
+```{r wls}
+
+#df <- df %>%
+#  mutate(weight = 1/(error^2))
+res = matrix(nrow = 1000, ncol = 1)
+i = 1
+for (m in ls(pattern = "df_")){
+  mod <- lm(ame ~ as.numeric(IncDiff) + as.numeric(House) + as.numeric(logit) + as.numeric(ols) + as.numeric(Stock) + as.numeric(ChangeFlow) + as.numeric(w1996) + as.numeric(w2006)*as.numeric(w2016) + as.numeric(orig13) + as.numeric(eeurope) +  as.numeric(allavailable) + as.numeric(twowayfe) + as.numeric(cy) + as.numeric(total_score) + as.numeric(V1) + as.numeric(V2) + as.numeric(V3) + as.numeric(V4) + as.numeric(V5) + as.numeric(V6) + as.numeric(V7) + as.numeric(V8) + as.numeric(V9) + as.numeric(V10) + as.numeric(V11) + as.numeric(V12) + as.numeric(V13) + as.numeric(V14) + as.numeric(V15) + as.numeric(V16) + as.numeric(V17) + as.numeric(V18) + as.numeric(V19) + as.numeric(V20) + as.numeric(V21) + as.numeric(V22) + as.numeric(V23) + as.numeric(V24) + as.numeric(V25) + as.numeric(V26) + as.numeric(V27) + as.numeric(V28) + as.numeric(V29) + as.numeric(V30) + as.numeric(V31) + as.numeric(V32) + as.numeric(V33) + as.numeric(V34) + as.numeric(V35) + as.numeric(V36) + as.numeric(V37) + as.numeric(V38) + as.numeric(V39) + as.numeric(V40) + as.numeric(V41) + as.numeric(V42) + as.numeric(V43) + as.numeric(V44) + as.numeric(V45) + as.numeric(V46), data = get(m), weights = 1/(as.numeric(error)^2))
+  res[i,1] <- summary(mod)$r.squared
+  i = i + 1
+}
+
+m1_orig_wls <- lm(ame ~ IncDiff + House + logit + ols + Stock + ChangeFlow + w1996 + w2006*w2016 + orig13 + eeurope + allavailable + twowayfe + cy + total_score, data = df, weights = 1/(as.numeric(error)^2))
+
+# calculate average
+
+wls_r2_dummies_avg <- mean(res[,1], na.rm = T)
+
+
+wls_r2 <- summary(m1_orig_wls)$r.squared
+
+ols_r2 <- summary(m1_orig)$r.squared
+
+res_df <- as.data.frame(res[,1])
+colnames(res_df) <- "r2"
+
+```
+
+### Plot Results
+
+```{r plotwls}
+agg_png(here::here("results", "Fig2.png"), res = 144, height = 500, width = 1000)
+
+  ggplot(aes(r2), data = res_df) +
+  geom_density(color = "#29AF7FFF") +
+  geom_vline(xintercept = ols_r2, color = "#B8DE29FF", linetype = "dashed") +
+  geom_vline(xintercept = wls_r2, color = "#404788FF", linetype = "dashed") +
+  geom_vline(xintercept = wls_r2_dummies_avg, color = '#29AF7FFF', linetype = "dashed") +
+  annotate("text", x = ols_r2+0.01, y = 18, label = "OLS with\n16 substantive\nvariables", color = "#B8DE29FF", size = 3, hjust = 0, vjust = 1) +
+  annotate("text", x = wls_r2-0.01, y = 18, label = "WLS with\n16 substantive\nvariables", color = "#404788FF", size = 3, hjust = 1, vjust = 1) +
+    annotate("text", x = wls_r2_dummies_avg+0.01, y = 18, label = "WLS with\n16 substantive\n& 46 randomly\ngenerated variables\n(avg of 1,000 models)", color = "#29AF7FFF", size = 3, hjust = 0, vjust = 1) +
+  xlab("r-squared") +
+  ylab("Density") +
+  #xlim(0.04,0.20) +
+  ylim(0,19) +
+  theme_classic() +
+    theme(axis.text.y = element_blank())
+dev.off()
+
+knitr::include_graphics(here::here("results", "Fig2.png"))
+```
+
