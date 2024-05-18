@@ -1,0 +1,205 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+ 
+
+```{r setup}
+pacman::p_load("tidyverse",
+               "readstata13",
+               "ragg")
+
+# variable simulator function
+rdum <- function(n, p){
+  # p is the proportion of 1s
+  x <- c(rep(1, times=n * p), rep(0, times=n * (1 - p)))
+  x[sample(length(x))] # or sample(x)
+}
+
+```
+
+## Data
+
+For simplicity I use the datafile from the A&B workflow https://osf.io/puax9. It is theoretically the same as what we worked up for our 04_Main_Analyses file in the original repository. I use it here to make sure we are comparing apples to apples.
+
+```{r data, warning = F}
+df <- read.dta13(here::here("data", "BRW Data set - augmented.dta"))
+```
+
+## Adding Random Dummies
+
+### Our original m13
+
+16 variables (coefficients)
+```{r m1}
+m1_orig <- lm(ame ~ IncDiff + House + logit + ols + Stock + ChangeFlow + w1996 + w2006*w2016 + orig13 + eeurope + allavailable + twowayfe + cy + total_score, data = df)
+
+m1r2a <- summary(m1_orig)$adj.r.squared
+m1r2 <- summary(m1_orig)$r.squared
+```
+
+### A&B augmented 1
+
+44 variables: Addition of 28 variables (coefficients)
+```{r m2}
+m2_AB <- lm(ame ~ factor(dv) + factor(IV) + saf + factor(IV_m) + factor(IV_s) + w1985 + w1990 + w1996 + w2006*w2016 + w2016 + orig13 + eeurope + allavailable + twowayfe + cy + as.numeric(total_score), data = df)
+
+m2r2a <- summary(m2_AB)$adj.r.squared
+m2r2 <- summary(m2_AB)$r.squared
+
+```
+
+### A&B augmented 2
+```{r m3}
+m3_AB <- lm(ame ~ SE + factor(dv) + factor(IV) + saf + factor(IV_m) + factor(IV_s) + factor(IV_t) + factor(IV_e) + squared_imm + logit + lpm + ols + ologit + mlogit + ml_glm + bayes + mlwin + mplus + dichotomize + categorical + mmodel + anynonlin + w1985 + w1990 + w1996 + w2006*w2016 + w2016 + mlm_re + mlm_fe + hybrid_mlm + orig13 + eeurope + allavailable + twowayfe + cy + as.numeric(total_score), data = df)
+
+m3r2a <- summary(m3_AB)$adj.r.squared
+m3r2 <- summary(m3_AB)$r.squared
+```
+
+### Simulate as many random dummies
+
+#### Generate Variables
+```{r m4sim}
+
+i = 1000
+seed = 123456
+
+for (f in 1:i) {
+  # setup empty dataframe for each i
+  seed = seed+1
+  set.seed(seed)
+  #do 18 random draws of a dummy variable with any plausible range
+  seq <- runif(18, min = 0.002, max = 0.998)
+  #add 4 draws of very rare cases, as many of the variables they included identify specific teams or just a few teams or models, make these by team as well
+  seq[c(19,20,21,22)] <- runif(4, min = 0.0008, max = 0.0012)
+  
+  dfn <- paste("df",f, sep = "_")
+  datalist = list()
+  for (n in 1:22) {
+    # unclear why we need an extra value (1254 v 1253)
+    dat <- rdum(1254, seq[n])
+    datalist[[n]] <- as.factor(dat)
+  }
+  
+  
+  # combine all results
+  dfx <- as.data.frame(do.call(cbind, c(df, as.data.frame(t(do.call(rbind, datalist))))))
+  
+  # add team specific dummies, many of the variables are at the team-level and unique to just a few teams, so this mirrors reality in the simulation
+  
+  tid <- as.data.frame(matrix(nrow = length(unique(df$tid)), ncol = 1))
+  tid$tid <- unique(df$tid)
+  tid <- select(tid, -V1)
+  dats <- sample(df$tid, 2)
+  tid$V23 <- ifelse(tid$tid %in% dats, 1, 0)
+  dats <- sample(df$tid, 2)
+  tid$V24 <- ifelse(tid$tid %in% dats, 1, 0)
+  dats <- sample(df$tid, 2)
+  tid$V25 <- ifelse(tid$tid %in% dats, 1, 0)
+  dats <- sample(df$tid, 3)
+  tid$V26 <- ifelse(tid$tid %in% dats, 1, 0)
+  dats <- sample(df$tid, 3)
+  tid$V27 <- ifelse(tid$tid %in% dats, 1, 0)
+  dats <- sample(df$tid, 3)
+  tid$V28 <- ifelse(tid$tid %in% dats, 1, 0)
+  
+  tid$tid <- as.character(tid$tid)
+  
+  assign(dfn, left_join(as.data.frame(dfx), tid, by = "tid"))
+  
+}
+
+```
+
+### Run regressions
+
+```{r m5}
+
+results <- lapply(mget(ls(pattern = "df_")), lm, formula = paste("ame ~", "IncDiff + House + logit + ols + Stock + ChangeFlow + w1996 + w2006*w2016 + orig13 + eeurope + allavailable + twowayfe + cy + as.numeric(total_score)", " + ", paste(paste0('V', 1:28), collapse="+")))
+
+rlist = list()
+for (i in seq_along(results)){
+  res_temp <- results[[i]]
+  sum_temp <- summary(res_temp)
+  r_squared <- sum_temp$r.squared
+  rlist[[i]] <- r_squared
+}
+
+rs <- as.data.frame(t(as.data.frame(rlist)))
+rownames(rs) <- NULL
+
+```
+
+
+
+```{r plot}
+agg_png(here::here("results", "Fig1.png"), res = 288, height = 1000, width = 2000)
+rs %>%
+  ggplot(aes(V1)) +
+  geom_density() +
+  geom_vline(xintercept = m2r2, color = "darkblue", linetype = "dashed") +
+  geom_vline(xintercept = m1r2, color = "yellow4", linetype = "dashed") +
+  annotate("text", x = 0.055, y = 40, label = "Original\n16 variable\nregression", color = "yellow4", size = 3, hjust = 1) +
+  annotate("text", x = 0.114, y = 40, label = "Extended\n44 variable\nregression", color = "darkblue", size = 3, hjust = 0) +
+  xlab("r-squared") +
+  ylab("Density") +
+  xlim(0.04,0.20) +
+  theme_classic()
+dev.off()
+
+knitr::include_graphics(here::here("results", "Fig1.png"))
+```
+
+## Weighted Least Squares
+
+Here we use the weighted least squares approach of A&B which they claim filters out low quality results as part of a proper meta-analytic step.
+
+We used a multiverse to simulate how much variance we might be able to explain in our original study
+https://github.com/nbreznau/CRI/blob/master/code/06_CRI_Multiverse.Rmd
+
+We import this multiverse here to apply a weighted least-squares regression.
+
+### Original Multiverse Simulation
+
+```{r multimodels, warning = FALSE}
+load(file = here::here("results/multi_df.Rda"))
+
+# m0 <- lm(AME ~ 1, data = multi_df)
+m1 <- lm(AME ~ factor(dv) + factor(AME_type), data = multi_df)
+m2 <- lm(AME ~ factor(dv) + factor(AME_type) + factor(sample), data = multi_df)
+m3 <- lm(AME ~ factor(dv) + factor(AME_type) + factor(sample) + unemp + socx + gdp + otherdv, data = multi_df)
+m4 <- lm(AME ~ factor(dv) + factor(AME_type) + factor(sample) + unemp + socx + gdp + otherdv + factor(mator), data = multi_df)
+m5 <- lm(AME ~ factor(dv) + factor(AME_type) + factor(dv)*factor(AME_type) + factor(sample) + unemp + socx + gdp + otherdv + factor(mator), data = multi_df)
+
+expvar <- matrix(nrow = 5, ncol = 3)
+
+expvar[,1] <- c("m1","m2","m3","m4","m5")
+expvar[,2] <- c("DVs + AME type","+ sample", "+ IVs", "+ other DV + Estimator", "DV*Type interaction")
+expvar[,3] <- c(summary(m1)[["r.squared"]], summary(m2)[["r.squared"]], summary(m3)[["r.squared"]], summary(m4)[["r.squared"]], summary(m5)[["r.squared"]])
+
+#write.csv(expvar, file = here::here("results/TblS8.csv"))
+```
+
+### Weighted Least Squares
+
+The formula for weighting is 1/SE^2 (SE of estimates)
+
+```{r wls}
+# calculate weights (SEs)
+coefficient <- 1.5      # Example coefficient value
+p_value <- 0.03         # Example p-value
+n <- 32                 # Number of observations
+k <- 3                  # Number of predictors including the intercept
+
+# Calculate the degrees of freedom
+df <- n - k
+
+# Calculate the t-statistic from the p-value
+t_value <- qt(1 - p_value / 2, df)
+
+# Calculate the standard error
+standard_error <- coefficient / t_value
+```
+
